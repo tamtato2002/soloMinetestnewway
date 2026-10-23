@@ -12,22 +12,33 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
-/** Minecraft-achievement style pop-ups (top-right, fast slide-in) for Daily Quest progress / clear. */
+/**
+ * Slide-in notifications on the top-left for Daily Quest progress / clear.
+ * Animation runs on real time (not game ticks), so it stays smooth at any FPS, with the
+ * system lagging, or while the System window is open.
+ */
 public final class QuestToasts {
-	private static final int W = 160, H = 32;
-	private static final int SLIDE = 3;           // ticks to slide in / out (fast, like vanilla toasts)
-	private static final int LIFE_PROGRESS = 34;  // ~1.7 s
-	private static final int LIFE_DONE = 70;      // 3.5 s
+	private static final int W = 160, H = 34, GAP = 4, TOP = 36;
+	private static final long SLIDE_IN_MS = 320;
+	private static final long SLIDE_OUT_MS = 260;
+	private static final long LIFE_PROGRESS_MS = 2200;
+	private static final long LIFE_DONE_MS = 4000;
 
 	private static final class Toast {
 		String key, name;
-		int cur, target, tier, age, life;
+		int cur, target, tier;
 		boolean done;
+		long born, expires;
+		float shownY = -1;       // smoothed vertical position (slides when toasts above disappear)
+		float shownFill = 0;     // smoothed progress bar
+		long flash;              // time of last update, for a short highlight
 	}
 
 	private static final List<Toast> LIST = new ArrayList<>();
 
 	private QuestToasts() {}
+
+	private static long now() { return System.nanoTime() / 1_000_000L; }
 
 	/** Compare old and new quest data and pop a toast for anything that moved. */
 	public static void diff(PlayerData old, PlayerData now) {
@@ -44,63 +55,85 @@ public final class QuestToasts {
 	}
 
 	private static void push(String key, String name, int cur, int target, int tier, boolean done) {
+		long n = now();
+		long life = done ? LIFE_DONE_MS : LIFE_PROGRESS_MS;
 		for (Toast t : LIST) {
 			if (t.key.equals(key)) {
 				t.cur = cur; t.target = target; t.done = done; t.name = name;
-				t.life = done ? LIFE_DONE : LIFE_PROGRESS;
-				t.age = Math.min(t.age, SLIDE); // keep it on screen without sliding in again
+				t.expires = n + life;
+				t.flash = n;
+				// already on screen: keep it there, never re-slide
+				if (n - t.born < SLIDE_IN_MS) t.born = Math.min(t.born, n - SLIDE_IN_MS);
 				return;
 			}
 		}
 		Toast t = new Toast();
 		t.key = key; t.name = name; t.cur = cur; t.target = target; t.tier = tier; t.done = done;
-		t.life = done ? LIFE_DONE : LIFE_PROGRESS;
+		t.born = n; t.expires = n + life; t.flash = n;
 		LIST.add(t);
 	}
 
 	public static void tick() {
-		for (int i = LIST.size() - 1; i >= 0; i--) {
-			Toast t = LIST.get(i);
-			t.age++;
-			if (t.age >= t.life) LIST.remove(i);
-		}
+		long n = now();
+		LIST.removeIf(t -> n >= t.expires + SLIDE_OUT_MS);
 	}
+
+	private static float easeOutCubic(float k) { float i = 1f - k; return 1f - i * i * i; }
+	private static float easeInCubic(float k) { return k * k * k; }
 
 	public static void render(GuiGraphicsExtractor g) {
 		if (LIST.isEmpty()) return;
 		var font = Minecraft.getInstance().font;
-		int sw = Minecraft.getInstance().getWindow().getGuiScaledWidth();
-		int y = 4;
+		long n = now();
+		float targetY = TOP;
+
 		for (Toast t : LIST) {
-			float in = Math.min(1f, t.age / (float) SLIDE);
-			float out = Math.min(1f, (t.life - t.age) / (float) SLIDE);
-			float k = Math.max(0f, Math.min(in, out));
-			float ease = 1f - (1f - k) * (1f - k);
-			int x = sw - W - 4 + (int) ((W + 10) * (1f - ease)); // slides in from the right edge
+			// horizontal slide: ease-out in, ease-in out (starts when the life time ends)
+			float inK = Math.min(1f, (n - t.born) / (float) SLIDE_IN_MS);
+			float outK = n > t.expires ? Math.min(1f, (n - t.expires) / (float) SLIDE_OUT_MS) : 0f;
+			float hidden = outK > 0 ? easeInCubic(outK) : 1f - easeOutCubic(inK); // 1 = fully off-screen
+			int x = 6 - (int) ((W + 12) * hidden);
 
-			SkillRarity r = QuestLogic.tierRarity(Math.max(0, Math.min(4, t.tier)));
+			// vertical: glide toward the slot instead of snapping
+			if (t.shownY < 0) t.shownY = targetY;
+			t.shownY += (targetY - t.shownY) * 0.25f;
+			if (Math.abs(targetY - t.shownY) < 0.3f) t.shownY = targetY;
+			int y = Math.round(t.shownY);
+			targetY += (H + GAP) * (1f - (outK > 0 ? easeInCubic(outK) : 0f));
+
+			// smooth progress bar
+			float want = (float) Math.min(1.0, t.cur / (double) Math.max(1, t.target));
+			t.shownFill += (want - t.shownFill) * 0.3f;
+			if (Math.abs(want - t.shownFill) < 0.004f) t.shownFill = want;
+
+			int tier = Math.max(0, Math.min(4, t.tier));
+			SkillRarity r = QuestLogic.tierRarity(tier);
 			int[] rgbByTier = {0xFFFFFF, 0x55FF55, 0x55FFFF, 0xFF55FF, 0xFFAA00};
-			int accent = t.done ? 0xFF4CD964 : (0xFF000000 | rgbByTier[Math.max(0, Math.min(4, t.tier))]);
+			int accent = t.done ? 0xFF4CD964 : (0xFF000000 | rgbByTier[tier]);
 
-			// panel + border + left accent bar
-			g.fill(x, y, x + W, y + H, 0xE0101828);
+			// short brighten when the toast updates
+			float fl = Math.max(0f, 1f - (n - t.flash) / 220f);
+			int bg = 0xE0101828;
+			if (fl > 0) {
+				int add = (int) (fl * 28);
+				bg = 0xE0000000 | (Math.min(255, 0x10 + add) << 16) | (Math.min(255, 0x18 + add) << 8) | Math.min(255, 0x28 + add);
+			}
+
+			g.fill(x, y, x + W, y + H, bg);
 			g.fill(x, y, x + W, y + 1, accent);
 			g.fill(x, y + H - 1, x + W, y + H, accent);
 			g.fill(x + W - 1, y, x + W, y + H, accent);
 			g.fill(x, y, x + 3, y + H, accent);
 
 			String title = t.done ? "QUEST CLEAR!" : "DAILY QUEST  [" + r.name() + "]";
-			g.text(font, Component.literal(title).withStyle(t.done ? ChatFormatting.GREEN : ChatFormatting.GRAY), x + 8, y + 3, 0xFFFFFFFF, true);
-			g.text(font, Component.literal(t.name + "   " + t.cur + "/" + t.target), x + 8, y + 13, 0xFFFFFFFF, true);
+			g.text(font, Component.literal(title).withStyle(t.done ? ChatFormatting.GREEN : ChatFormatting.GRAY), x + 8, y + 4, 0xFFFFFFFF, true);
+			g.text(font, Component.literal(t.name + "   " + t.cur + "/" + t.target), x + 8, y + 15, 0xFFFFFFFF, true);
 
-			// progress bar
-			int bx = x + 8, by = y + 25, bw = W - 16;
+			int bx = x + 8, by = y + 27, bw = W - 16;
 			g.fill(bx, by, bx + bw, by + 3, 0xFF2A3350);
-			int fw = (int) (bw * Math.min(1.0, t.cur / (double) Math.max(1, t.target)));
-			g.fill(bx, by, bx + fw, by + 3, accent);
+			g.fill(bx, by, bx + (int) (bw * t.shownFill), by + 3, accent);
 
-			if (t.done) check(g, x + W - 24, y + 4, 0xFF55FF55);
-			y += H + 3;
+			if (t.done) check(g, x + W - 24, y + 5, 0xFF55FF55);
 		}
 	}
 
