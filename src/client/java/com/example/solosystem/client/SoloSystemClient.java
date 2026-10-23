@@ -1,0 +1,39 @@
+package com.example.solosystem.client;
+
+import com.example.solosystem.PlayerData;
+import com.example.solosystem.SoloSystemMod;
+import com.example.solosystem.net.SyncPayload;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.minecraft.client.KeyMapping;
+import org.lwjgl.sdl.SDLScancode;
+
+public class SoloSystemClient implements ClientModInitializer {
+	@Override
+	public void onInitializeClient() {
+		ClientPlayNetworking.registerGlobalReceiver(SyncPayload.TYPE, (payload, context) -> {
+			PlayerData old = ClientState.data;
+			PlayerData now = payload.data();
+			QuestToasts.diff(old, now);
+			ClientState.data = now;
+			if (context.client().gui.screen() instanceof SystemScreen s) s.refresh();
+		});
+
+		HudElementRegistry.addLast(SoloSystemMod.id("quest_toasts"), (graphics, deltaTracker) -> QuestToasts.render(graphics));
+
+		KeyMapping.Category category = KeyMapping.Category.register(SoloSystemMod.id("main"));
+		KeyMapping open = KeyMappingHelper.registerKeyMapping(
+			new KeyMapping("key.solosystem.open", InputConstants.Type.KEYBOARD, SDLScancode.SDL_SCANCODE_Y, category));
+
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+			QuestToasts.tick();
+			while (open.consumeClick()) {
+				if (mc.gui.screen() == null && mc.player != null) mc.gui.setScreen(new SystemScreen());
+			}
+		});
+	}
+}
