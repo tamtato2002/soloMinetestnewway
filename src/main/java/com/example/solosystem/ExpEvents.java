@@ -18,6 +18,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -49,6 +50,7 @@ public final class ExpEvents {
 			if (state.is(BlockTags.LOGS)) QuestLogic.progress(sp, QuestType.CHOP, 1);
 			if (isOre(state)) QuestLogic.progress(sp, QuestType.ORE, 1);
 			doubleDrops(sp, level, pos, state, be);
+			skillFromBlock(sp, state);
 		});
 
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
@@ -60,6 +62,17 @@ public final class ExpEvents {
 	private static boolean isOre(BlockState s) {
 		return s.is(COAL) || s.is(COPPER) || s.is(IRON) || s.is(LAPIS) || s.is(REDSTONE)
 			|| s.is(GOLD) || s.is(DIAMOND) || s.is(EMERALD) || s.is(Blocks.ANCIENT_DEBRIS) || s.is(ALL_ORES);
+	}
+
+	/** Mining stone, ores, chopping and harvesting ripe crops can all award a random passive skill. */
+	private static void skillFromBlock(ServerPlayer sp, BlockState s) {
+		double chance = 0.0004, boost = 0;
+		if (s.is(Blocks.ANCIENT_DEBRIS) || s.is(DIAMOND) || s.is(EMERALD)) { chance = 0.05; boost = 1.5; }
+		else if (isOre(s)) { chance = 0.012; boost = 0.5; }
+		else if (s.is(BlockTags.LOGS)) chance = 0.0025;
+		else if (s.getBlock() instanceof CropBlock crop && crop.isMaxAge(s)) chance = 0.004;
+		else if (s.is(BlockTags.MINEABLE_WITH_PICKAXE)) chance = 0.0012;
+		SystemLogic.rollSkill(sp, chance, boost);
 	}
 
 	/** PER: chance to double the drops of ores and logs (works for ores/logs of any mod). */
@@ -98,6 +111,8 @@ public final class ExpEvents {
 		if (boss) exp += 1000;
 		SystemLogic.addExp(sp, exp);
 		if (hostile) QuestLogic.progress(sp, QuestType.KILL, 1);
+		int harvest = SystemLogic.data(sp).rank(PassiveSkill.SOUL_HARVEST);
+		if (hostile && harvest > 0) sp.heal(2.0f * harvest);
 
 		// skill drop from monsters
 		double chance = boss ? 1.0 : hostile ? Math.min(0.5, 0.02 + hp * 0.002) : 0.005;

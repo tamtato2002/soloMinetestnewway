@@ -51,7 +51,7 @@ public final class SystemLogic {
 		if (base <= 0) return;
 		PlayerData d = data(p);
 		double mult = 1.0 + Perks.expBonus(d) + 0.10 * d.rank(PassiveSkill.MONARCH_DOMAIN) + 0.05 * d.rank(PassiveSkill.SAGES_MIND);
-		d.exp += base * mult;
+		d.exp += base * mult * ServerConfig.expMultiplier;
 		boolean leveled = false;
 		while (d.exp >= d.expToNext()) {
 			d.exp -= d.expToNext();
@@ -84,7 +84,7 @@ public final class SystemLogic {
 	/** Roll for a passive skill. rarityBoost shifts odds toward rarer skills. */
 	public static void rollSkill(ServerPlayer p, double chance, double rarityBoost) {
 		ThreadLocalRandom rnd = ThreadLocalRandom.current();
-		if (rnd.nextDouble() >= chance) return;
+		if (rnd.nextDouble() >= chance * ServerConfig.skillChanceMultiplier) return;
 		PlayerData d = data(p);
 
 		SkillRarity rarity = rollRarity(rnd, rarityBoost);
@@ -127,9 +127,13 @@ public final class SystemLogic {
 
 	public static void tick(MinecraftServer server) {
 		int t = server.getTickCount();
+		long clock = QuestLogic.clockDelta(server); // 1 normally, big when the night is skipped by sleeping
 		for (ServerPlayer p : server.getPlayerList().getPlayers()) {
 			if (!p.isAlive()) continue;
 			PlayerData d = data(p);
+			d.questLeft -= clock;
+			if (d.questLeft <= 0) QuestLogic.ensure(p, d);
+			else if (clock > 20) sync(p); // time jumped: tell the client right away
 			if (t % 4 == 0) magnet(p, d);
 			PerkLogic.tick(p, d, t);
 			if (t % 5 == 0) pollStats(p); // fast poll -> walking/fishing/breeding quest pop-ups appear quickly
@@ -150,7 +154,7 @@ public final class SystemLogic {
 
 	private static long[] snapshot(ServerPlayer p) {
 		return new long[]{totalCm(p), stat(p, Stats.FISH_CAUGHT), stat(p, Stats.ANIMALS_BRED),
-			stat(p, Stats.TRADED_WITH_VILLAGER), stat(p, Stats.ENCHANT_ITEM)};
+			stat(p, Stats.TRADED_WITH_VILLAGER), stat(p, Stats.ENCHANT_ITEM), stat(p, Stats.JUMP)};
 	}
 
 	/** Actions that have no event hook: read vanilla statistics and award EXP for the change. */
@@ -164,22 +168,26 @@ public final class SystemLogic {
 			double blocks = dCm / 100.0;
 			addExp(p, blocks * 0.02); // 0.02 EXP per block
 			QuestLogic.progress(p, QuestType.WALK, blocks);
+			rollSkill(p, Math.min(1.0, blocks * 0.00025), 0); // ~1 skill per 4000 blocks travelled
 		}
 		long fish = cur[1] - last[1];
 		if (fish > 0) {
 			addExp(p, fish * 12.0);
 			QuestLogic.progress(p, QuestType.FISH, fish);
-			rollSkill(p, Math.min(1.0, 0.03 * fish), 0.5);
+			rollSkill(p, Math.min(1.0, 0.08 * fish), 0.5);
 		}
 		long bred = cur[2] - last[2];
 		if (bred > 0) {
 			addExp(p, bred * 8.0);
 			QuestLogic.progress(p, QuestType.BREED, bred);
+			rollSkill(p, Math.min(1.0, 0.04 * bred), 0.3);
 		}
 		long trade = cur[3] - last[3];
-		if (trade > 0) addExp(p, trade * 10.0);
+		if (trade > 0) { addExp(p, trade * 10.0); rollSkill(p, Math.min(1.0, 0.025 * trade), 0.3); }
 		long ench = cur[4] - last[4];
-		if (ench > 0) addExp(p, ench * 20.0);
+		if (ench > 0) { addExp(p, ench * 20.0); rollSkill(p, Math.min(1.0, 0.06 * ench), 1.0); }
+		long jumps = cur[5] - last[5];
+		if (jumps > 0) rollSkill(p, Math.min(1.0, 0.0008 * jumps), 0);
 	}
 
 	private static void stomach(ServerPlayer p, PlayerData d) {
@@ -221,12 +229,20 @@ public final class SystemLogic {
 		mod(p, Attributes.FALL_DAMAGE_MULTIPLIER, "fall", -Math.min(0.9, 0.25 * d.rank(PassiveSkill.FEATHER_FALL) + Perks.fallReduce(d)), Operation.ADD_VALUE);
 		// STR: faster mining AND chopping on every block / tool / mod (multiplier on block break speed)
 		mod(p, Attributes.BLOCK_BREAK_SPEED, "dig", Perks.digSpeed(d), Operation.ADD_MULTIPLIED_BASE);
+		mod(p, Attributes.BLOCK_BREAK_SPEED, "skill_dig", 0.2 * d.rank(PassiveSkill.TIRELESS_ARMS), Operation.ADD_MULTIPLIED_BASE);
+		mod(p, Attributes.KNOCKBACK_RESISTANCE, "knockback", 0.25 * d.rank(PassiveSkill.IMMOVABLE), Operation.ADD_VALUE);
+		mod(p, Attributes.SAFE_FALL_DISTANCE, "safe_fall", 6.0 * d.rank(PassiveSkill.SKY_LORD), Operation.ADD_VALUE);
+		mod(p, Attributes.JUMP_STRENGTH, "sky_jump", 0.1 * d.rank(PassiveSkill.SKY_LORD), Operation.ADD_VALUE);
 		mod(p, Attributes.OXYGEN_BONUS, "oxygen", 3.0 * d.rank(PassiveSkill.GILLS), Operation.ADD_VALUE);
 		mod(p, Attributes.WATER_MOVEMENT_EFFICIENCY, "swim", 0.15 * d.rank(PassiveSkill.GILLS), Operation.ADD_VALUE);
 		mod(p, Attributes.MINING_EFFICIENCY, "mining", 1.0 * d.rank(PassiveSkill.MINERS_HANDS) + 0.5 * d.rank(PassiveSkill.QUICK_HANDS), Operation.ADD_VALUE);
 
 		if (d.rank(PassiveSkill.CAT_EYES) > 0)
 			p.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 400, 0, true, false, false));
+		if (d.rank(PassiveSkill.TIDAL_BLESSING) > 0) {
+			p.addEffect(new MobEffectInstance(MobEffects.WATER_BREATHING, 400, 0, true, false, false));
+			p.addEffect(new MobEffectInstance(MobEffects.DOLPHINS_GRACE, 100, 0, true, false, false));
+		}
 		if (d.rank(PassiveSkill.HEAT_WARD) > 0)
 			p.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 100, 0, true, false, false));
 		int regen = d.rank(PassiveSkill.REGEN);

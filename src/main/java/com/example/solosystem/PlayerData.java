@@ -15,7 +15,7 @@ public class PlayerData {
 		Codec.unboundedMap(Codec.STRING, Codec.INT).optionalFieldOf("stats", Map.of()).forGetter(d -> d.stats),
 		Codec.unboundedMap(Codec.STRING, Codec.INT).optionalFieldOf("skills", Map.of()).forGetter(d -> d.skills),
 		Codec.unboundedMap(Codec.STRING, Codec.INT).optionalFieldOf("resist", Map.of()).forGetter(d -> d.resist),
-		Codec.LONG.optionalFieldOf("questExpiry", 0L).forGetter(d -> d.questExpiry),
+		Codec.LONG.optionalFieldOf("questLeft", 0L).forGetter(d -> d.questLeft),
 		Quest.CODEC.listOf().optionalFieldOf("quests", List.of()).forGetter(d -> d.quests)
 	).apply(i, PlayerData::new));
 
@@ -26,17 +26,17 @@ public class PlayerData {
 	public final Map<String, Integer> skills = new HashMap<>();
 	/** resistance id -> number of exposures */
 	public final Map<String, Integer> resist = new HashMap<>();
-	/** game tick (overworld game time) when the current daily quests expire */
-	public long questExpiry = 0;
+	/** ticks of "quest time" left. Counts down with the in-game day clock, so sleeping skips it too. */
+	public long questLeft = 0;
 	public final List<Quest> quests = new ArrayList<>();
 
 	public PlayerData() {}
 
 	public PlayerData(int level, double exp, int points, Map<String, Integer> stats, Map<String, Integer> skills,
-					  Map<String, Integer> resist, long questExpiry, List<Quest> quests) {
+					  Map<String, Integer> resist, long questLeft, List<Quest> quests) {
 		this.level = level; this.exp = exp; this.points = points;
 		this.stats.putAll(stats); this.skills.putAll(skills); this.resist.putAll(resist);
-		this.questExpiry = questExpiry;
+		this.questLeft = questLeft;
 		for (Quest q : quests) this.quests.add(q.copy());
 	}
 
@@ -47,5 +47,5 @@ public class PlayerData {
 	public static double expToNext(int level) { return 40 + 18.0 * level + 4.0 * level * level; }
 	public double expToNext() { return expToNext(level); }
 
-	public PlayerData copy() { return new PlayerData(level, exp, points, stats, skills, resist, questExpiry, quests); }
+	public PlayerData copy() { return new PlayerData(level, exp, points, stats, skills, resist, questLeft, quests); }
 }

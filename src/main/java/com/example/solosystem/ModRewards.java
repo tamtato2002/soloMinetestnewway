@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
@@ -32,27 +31,10 @@ public final class ModRewards {
 
 	public static final List<List<Extra>> EXTRA = new ArrayList<>();
 	public static final List<List<Item>> AUTO_GEAR = new ArrayList<>();
-	public static double autoGearChance = 0.5;
 
 	private static boolean loaded = false;
 
 	private ModRewards() {}
-
-	private static final String DEFAULT_CONFIG = """
-		{
-		  "_help": "Rewards from other mods. Items of mods that are not installed are ignored. Tiers: 0=COMMON 1=UNCOMMON 2=RARE 3=EPIC 4=LEGENDARY",
-		  "autoDiscoverModGear": true,
-		  "autoGearChance": 0.5,
-		  "blacklist": ["examplemod", "examplemod:broken_item"],
-		  "extraRewards": {
-		    "0": [ { "item": "examplemod:example_ingot", "min": 2, "max": 6 } ],
-		    "1": [],
-		    "2": [ { "item": "examplemod:example_sword", "min": 1, "max": 1 } ],
-		    "3": [],
-		    "4": []
-		  }
-		}
-		""";
 
 	public static synchronized void ensureLoaded() {
 		if (loaded) return;
@@ -62,12 +44,11 @@ public final class ModRewards {
 		boolean auto = true;
 		Set<String> blacklist = new HashSet<>();
 		try {
-			Path file = FabricLoader.getInstance().getConfigDir().resolve("solosystem.json");
-			if (!Files.exists(file)) Files.writeString(file, DEFAULT_CONFIG);
+			ServerConfig.load(); // also creates the file the first time
+			Path file = ServerConfig.file();
 			JsonObject root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
 
 			if (root.has("autoDiscoverModGear")) auto = root.get("autoDiscoverModGear").getAsBoolean();
-			if (root.has("autoGearChance")) autoGearChance = Math.max(0, Math.min(1, root.get("autoGearChance").getAsDouble()));
 			if (root.has("blacklist")) for (JsonElement e : root.getAsJsonArray("blacklist")) blacklist.add(e.getAsString());
 
 			if (root.has("extraRewards")) {

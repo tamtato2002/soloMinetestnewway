@@ -18,11 +18,10 @@ import net.minecraft.network.chat.Component;
  * system lagging, or while the System window is open.
  */
 public final class QuestToasts {
-	private static final int W = 160, H = 34, GAP = 4, TOP = 36;
-	private static final long SLIDE_IN_MS = 320;
-	private static final long SLIDE_OUT_MS = 260;
+	private static final int W = 190, H = 34, GAP = 4;
 	private static final long LIFE_PROGRESS_MS = 2200;
 	private static final long LIFE_DONE_MS = 4000;
+	private static int previewCount = 0;
 
 	private static final class Toast {
 		String key, name;
@@ -42,7 +41,7 @@ public final class QuestToasts {
 
 	/** Compare old and new quest data and pop a toast for anything that moved. */
 	public static void diff(PlayerData old, PlayerData now) {
-		if (old.quests.isEmpty() || now.quests.isEmpty()) return;
+		if (!ClientConfig.toasts || old.quests.isEmpty() || now.quests.isEmpty()) return;
 		for (Quest q : now.quests) {
 			Quest o = null;
 			for (Quest x : old.quests) if (x.type.equals(q.type) && x.tier == q.tier && x.target == q.target) o = x;
@@ -50,20 +49,21 @@ public final class QuestToasts {
 			QuestType t = QuestType.byId(q.type);
 			String name = t == null ? q.type : t.label;
 			if (q.done && !o.done) push(q.type, name, q.target, q.target, q.tier, true);
-			else if (!q.done && (int) q.progress > (int) o.progress) push(q.type, name, (int) q.progress, q.target, q.tier, false);
+			else if (ClientConfig.progressToasts && !q.done && (int) q.progress > (int) o.progress) push(q.type, name, (int) q.progress, q.target, q.tier, false);
 		}
 	}
 
 	private static void push(String key, String name, int cur, int target, int tier, boolean done) {
 		long n = now();
-		long life = done ? LIFE_DONE_MS : LIFE_PROGRESS_MS;
+		long life = (long) ((done ? LIFE_DONE_MS : LIFE_PROGRESS_MS) * ClientConfig.stayMul());
+		long slideIn = ClientConfig.slideInMs();
 		for (Toast t : LIST) {
 			if (t.key.equals(key)) {
 				t.cur = cur; t.target = target; t.done = done; t.name = name;
 				t.expires = n + life;
 				t.flash = n;
 				// already on screen: keep it there, never re-slide
-				if (n - t.born < SLIDE_IN_MS) t.born = Math.min(t.born, n - SLIDE_IN_MS);
+				if (n - t.born < slideIn) t.born = Math.min(t.born, n - slideIn);
 				return;
 			}
 		}
@@ -73,9 +73,16 @@ public final class QuestToasts {
 		LIST.add(t);
 	}
 
+	/** Shows a sample pop-up so the CONFIG tab can preview side / speed / duration. */
+	public static void preview() {
+		previewCount = previewCount % 10 + 1;
+		push("preview", "Preview Quest", previewCount, 10, 2, false);
+	}
+
 	public static void tick() {
 		long n = now();
-		LIST.removeIf(t -> n >= t.expires + SLIDE_OUT_MS);
+		long out = ClientConfig.slideOutMs();
+		LIST.removeIf(t -> n >= t.expires + out);
 	}
 
 	private static float easeOutCubic(float k) { float i = 1f - k; return 1f - i * i * i; }
@@ -85,14 +92,17 @@ public final class QuestToasts {
 		if (LIST.isEmpty()) return;
 		var font = Minecraft.getInstance().font;
 		long n = now();
-		float targetY = TOP;
+		float targetY = ClientConfig.topPx();
+		int sw = Minecraft.getInstance().getWindow().getGuiScaledWidth();
+		long slideInMs = ClientConfig.slideInMs(), slideOutMs = ClientConfig.slideOutMs();
+		boolean right = ClientConfig.side == 1;
 
 		for (Toast t : LIST) {
 			// horizontal slide: ease-out in, ease-in out (starts when the life time ends)
-			float inK = Math.min(1f, (n - t.born) / (float) SLIDE_IN_MS);
-			float outK = n > t.expires ? Math.min(1f, (n - t.expires) / (float) SLIDE_OUT_MS) : 0f;
+			float inK = Math.min(1f, (n - t.born) / (float) slideInMs);
+			float outK = n > t.expires ? Math.min(1f, (n - t.expires) / (float) slideOutMs) : 0f;
 			float hidden = outK > 0 ? easeInCubic(outK) : 1f - easeOutCubic(inK); // 1 = fully off-screen
-			int x = 6 - (int) ((W + 12) * hidden);
+			int x = right ? sw - W - 6 + (int) ((W + 12) * hidden) : 6 - (int) ((W + 12) * hidden);
 
 			// vertical: glide toward the slot instead of snapping
 			if (t.shownY < 0) t.shownY = targetY;
@@ -126,13 +136,14 @@ public final class QuestToasts {
 			g.fill(x, y, x + 3, y + H, accent);
 
 			String title = t.done ? "QUEST CLEAR!" : "DAILY QUEST  [" + r.name() + "]";
-			g.text(font, Component.literal(title).withStyle(t.done ? ChatFormatting.GREEN : ChatFormatting.GRAY), x + 8, y + 4, 0xFFFFFFFF, true);
-			g.text(font, Component.literal(t.name + "   " + t.cur + "/" + t.target), x + 8, y + 15, 0xFFFFFFFF, true);
+			g.text(font, Component.literal(title).withStyle(t.done ? ChatFormatting.GREEN : ChatFormatting.GRAY), x + 30, y + 4, 0xFFFFFFFF, true);
+			g.text(font, Component.literal(t.name + "   " + t.cur + "/" + t.target), x + 30, y + 15, 0xFFFFFFFF, true);
 
-			int bx = x + 8, by = y + 27, bw = W - 16;
+			int bx = x + 30, by = y + 27, bw = W - 40;
 			g.fill(bx, by, bx + bw, by + 3, 0xFF2A3350);
 			g.fill(bx, by, bx + (int) (bw * t.shownFill), by + 3, accent);
 
+			Icons.draw(g, "quests", x + 9, y + 9, 1);
 			if (t.done) check(g, x + W - 24, y + 5, 0xFF55FF55);
 		}
 	}

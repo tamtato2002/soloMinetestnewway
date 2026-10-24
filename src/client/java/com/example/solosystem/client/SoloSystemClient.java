@@ -15,11 +15,13 @@ import org.lwjgl.sdl.SDLScancode;
 public class SoloSystemClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
+		ClientConfig.load();
 		ClientPlayNetworking.registerGlobalReceiver(SyncPayload.TYPE, (payload, context) -> {
 			PlayerData old = ClientState.data;
 			PlayerData now = payload.data();
 			QuestToasts.diff(old, now);
 			ClientState.data = now;
+			ClientState.syncGameTime = context.client().level != null ? context.client().level.getGameTime() : 0;
 			if (context.client().gui.screen() instanceof SystemScreen s) s.refresh();
 		});
 

@@ -28,10 +28,18 @@ public enum PassiveSkill {
 	LUCKY("lucky", "Fortune's Favor", "+1 luck / rank", SkillRarity.EPIC, 3),
 	TITAN_FRAME("titan_frame", "Titan Frame", "+4 max HP, +1 toughness / rank", SkillRarity.EPIC, 3),
 	WINDWALKER("windwalker", "Windwalker", "+8% move speed / rank", SkillRarity.EPIC, 3),
+	IMMOVABLE("immovable", "Immovable Stance", "+25% knockback resistance / rank", SkillRarity.EPIC, 3),
+	TIRELESS_ARMS("tireless_arms", "Tireless Arms", "+20% mining & chopping speed / rank", SkillRarity.EPIC, 3),
+	SOUL_HARVEST("soul_harvest", "Soul Harvest", "Heal 2 HP per monster kill / rank", SkillRarity.EPIC, 3),
+	TIDAL_BLESSING("tidal_blessing", "Tidal Blessing", "Water breathing + dolphin's grace", SkillRarity.EPIC, 1),
 	// ---- LEGENDARY
 	SOVEREIGN_REACH("sovereign_reach", "Sovereign's Reach", "+2 block reach, +1.5 entity reach", SkillRarity.LEGENDARY, 1),
 	MONARCH_DOMAIN("monarch_domain", "Monarch's Domain", "+10% EXP gain / rank", SkillRarity.LEGENDARY, 3),
-	MONARCH_AEGIS("monarch_aegis", "Monarch's Aegis", "+5 armor, +2 toughness / rank", SkillRarity.LEGENDARY, 2);
+	MONARCH_AEGIS("monarch_aegis", "Monarch's Aegis", "+5 armor, +2 toughness / rank", SkillRarity.LEGENDARY, 2),
+	SKY_LORD("sky_lord", "Sky Lord", "+6 safe fall blocks, higher jump / rank", SkillRarity.LEGENDARY, 2),
+	UNDYING_WILL("undying_will", "Undying Will", "Survive a fatal hit (cooldown 10 / 5 min)", SkillRarity.LEGENDARY, 2),
+	ARCHMAGE_MIND("archmage_mind", "Archmage's Mind", "+10 effective INT for enchanting / rank", SkillRarity.LEGENDARY, 3),
+	MIDAS_TOUCH("midas_touch", "Midas Touch", "+15% ore/log double drop / rank", SkillRarity.LEGENDARY, 3);
 
 	public final String id, displayName, desc;
 	public final SkillRarity rarity;

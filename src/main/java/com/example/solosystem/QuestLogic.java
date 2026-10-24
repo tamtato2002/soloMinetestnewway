@@ -14,7 +14,7 @@ import net.minecraft.world.item.Items;
 
 /**
  * Daily quests: 3 random quests (COMMON..LEGENDARY). They reset every 24000 game ticks
- * (= 1 Minecraft day, ~20 real minutes; sleeping does not skip it). Rewards are rolled randomly per quest.
+ * (= 1 Minecraft day, ~20 real minutes; sleeping skips it together with the night). Rewards are rolled randomly per quest.
  */
 public final class QuestLogic {
 	public static final long DAY_TICKS = 24000L;
@@ -98,19 +98,68 @@ public final class QuestLogic {
 
 	// ---------------------------------------------------------------- generation
 
-	public static long gameTime(ServerPlayer p) { return p.level().getServer().overworld().getGameTime(); }
+	// ---------------------------------------------------------------- quest clock (follows the in-game day clock)
 
-	public static void ensure(ServerPlayer p, PlayerData d) {
-		long now = gameTime(p);
-		if (d.quests.isEmpty() || now >= d.questExpiry || d.questExpiry - now > DAY_TICKS) generate(p, d, now);
+	private static java.lang.reflect.Method dayMethod;
+	private static boolean dayViaLevelData = false, dayFailed = false;
+	private static long lastDay = -1;
+
+	/**
+	 * How many quest ticks passed since the last server tick. Normally 1, but when the world time jumps
+	 * (sleeping through the night, /time add) it is the whole jump - so the Daily Quest timer skips with the night.
+	 * The day-time getter is looked up by reflection; if Minecraft hides it, the timer simply runs 1/tick.
+	 */
+	public static long clockDelta(net.minecraft.server.MinecraftServer server) {
+		long day = readDayTime(server);
+		if (day < 0) return 1;
+		long prev = lastDay;
+		lastDay = day;
+		if (prev < 0) return 1;
+		long d = day - prev;
+		return d <= 0 ? 1 : Math.min(d, DAY_TICKS);
 	}
 
-	private static void generate(ServerPlayer p, PlayerData d, long now) {
+	private static long readDayTime(net.minecraft.server.MinecraftServer server) {
+		if (dayFailed) return -1;
+		try {
+			Object level = server.overworld();
+			if (dayMethod == null) {
+				dayMethod = findDayMethod(level.getClass());
+				if (dayMethod == null) {
+					java.lang.reflect.Method gld = level.getClass().getMethod("getLevelData");
+					dayMethod = findDayMethod(gld.invoke(level).getClass());
+					dayViaLevelData = dayMethod != null;
+				}
+				if (dayMethod == null) throw new NoSuchMethodException("day time getter");
+			}
+			Object target = dayViaLevelData ? level.getClass().getMethod("getLevelData").invoke(level) : level;
+			return ((Number) dayMethod.invoke(target)).longValue();
+		} catch (Throwable t) {
+			dayFailed = true;
+			org.slf4j.LoggerFactory.getLogger("solosystem")
+				.warn("[SoloSystem] could not read world day time, quests will not skip when sleeping: {}", t.toString());
+			return -1;
+		}
+	}
+
+	private static java.lang.reflect.Method findDayMethod(Class<?> c) {
+		for (java.lang.reflect.Method m : c.getMethods()) {
+			if (m.getParameterCount() == 0 && (m.getReturnType() == long.class || m.getReturnType() == Long.class)
+				&& m.getName().toLowerCase().contains("daytime")) return m;
+		}
+		return null;
+	}
+
+	public static void ensure(ServerPlayer p, PlayerData d) {
+		if (d.quests.isEmpty() || d.questLeft <= 0 || d.questLeft > DAY_TICKS) generate(p, d);
+	}
+
+	private static void generate(ServerPlayer p, PlayerData d) {
 		initPools();
 		ThreadLocalRandom rnd = ThreadLocalRandom.current();
 		boolean reset = !d.quests.isEmpty();
 		d.quests.clear();
-		d.questExpiry = now + DAY_TICKS;
+		d.questLeft = DAY_TICKS;
 
 		List<QuestType> types = new ArrayList<>(List.of(QuestType.values()));
 		Collections.shuffle(types);
@@ -137,7 +186,7 @@ public final class QuestLogic {
 				codes.add(rw.id() + "*" + count);
 			}
 			// bonus: a weapon / tool / armor piece from ANOTHER mod (if any are installed)
-			if (rnd.nextDouble() < ModRewards.autoGearChance) {
+			if (rnd.nextDouble() < ServerConfig.modGearChance) {
 				Item gear = ModRewards.randomGear(tier, rnd);
 				if (gear != null) codes.add(BuiltInRegistries.ITEM.getKey(gear).toString() + "*1");
 			}

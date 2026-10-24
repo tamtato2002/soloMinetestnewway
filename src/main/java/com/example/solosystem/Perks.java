@@ -27,14 +27,15 @@ public final class Perks {
 	// ---- INT
 	public static double expBonus(PlayerData d)  { return 0.01 * d.stat(Stat.INT); }
 	/** per enchantment: chance to get +1 level when enchanting (up to that enchantment's max) */
-	public static double enchantUp(PlayerData d) { return Math.min(0.75, 0.01 * d.stat(Stat.INT)); }
+	public static int effInt(PlayerData d) { return d.stat(Stat.INT) + 10 * d.rank(PassiveSkill.ARCHMAGE_MIND); }
+	public static double enchantUp(PlayerData d) { return Math.min(0.75, 0.01 * effInt(d)); }
 	/** chance to receive one extra compatible enchantment */
-	public static double enchantExtra(PlayerData d) { return Math.min(0.5, 0.006 * d.stat(Stat.INT)); }
+	public static double enchantExtra(PlayerData d) { return Math.min(0.5, 0.006 * effInt(d)); }
 
 	// ---- PER
 	public static double luck(PlayerData d)      { return 0.1 * d.stat(Stat.PER); }
 	public static double blockReach(PlayerData d){ return 0.05 * d.stat(Stat.PER); }
 	public static double entityReach(PlayerData d){ return 0.03 * d.stat(Stat.PER); }
 	/** chance to double the drops of ores and logs */
-	public static double doubleDrop(PlayerData d){ return Math.min(0.5, 0.005 * d.stat(Stat.PER)); }
+	public static double doubleDrop(PlayerData d){ return Math.min(0.75, 0.005 * d.stat(Stat.PER) + 0.15 * d.rank(PassiveSkill.MIDAS_TOUCH)); }
 }

@@ -33,7 +33,27 @@ public final class PerkLogic {
 
 	private PerkLogic() {}
 
+	private static final Map<UUID, Long> UNDYING = new HashMap<>();
+
+	public static void register() {
+		// Undying Will: cancel one fatal hit every few minutes
+		net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+			if (!(entity instanceof ServerPlayer sp)) return true;
+			int rank = SystemLogic.data(sp).rank(PassiveSkill.UNDYING_WILL);
+			if (rank <= 0) return true;
+			long now = sp.level().getServer().getTickCount();
+			Long ready = UNDYING.get(sp.getUUID());
+			if (ready != null && now < ready) return true;
+			UNDYING.put(sp.getUUID(), now + (rank >= 2 ? 6000L : 12000L));
+			sp.setHealth(Math.max(4.0f, sp.getMaxHealth() * 0.5f));
+			sp.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.REGENERATION, 100, 1));
+			SystemLogic.msg(sp, "Undying Will! You refused to fall.", ChatFormatting.GOLD);
+			return false;
+		});
+	}
+
 	public static void onLeave(UUID id) {
+		UNDYING.remove(id);
 		SNAPS.remove(id);
 		ENCH_LAST.remove(id);
 	}

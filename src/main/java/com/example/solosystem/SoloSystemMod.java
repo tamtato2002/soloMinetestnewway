@@ -23,6 +23,7 @@ public class SoloSystemMod implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		ServerConfig.load();
 		PayloadTypeRegistry.clientboundPlay().register(SyncPayload.TYPE, SyncPayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(AllocatePayload.TYPE, AllocatePayload.CODEC);
 
@@ -41,5 +42,6 @@ public class SoloSystemMod implements ModInitializer {
 
 		ExpEvents.register();
 		ResistLogic.register();
+		PerkLogic.register();
 	}
 }
